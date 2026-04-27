@@ -337,15 +337,19 @@ export default function GridCanvas({
         setSpacePressed(true);
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedItemIds.length > 0) {
-          e.preventDefault();
-          handleDeleteMultiSelection();
-        } else if (selectedId) {
-          e.preventDefault();
-          handleDelete(selectedId);
-        } else if (selectedIndividualId) {
-          e.preventDefault();
-          handleDelete(selectedIndividualId);
+        const tag = (e.target as HTMLElement).tagName;
+        const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement).isContentEditable;
+        if (!isEditable) {
+          if (selectedItemIds.length > 0) {
+            e.preventDefault();
+            handleDeleteMultiSelection();
+          } else if (selectedId) {
+            e.preventDefault();
+            handleDelete(selectedId);
+          } else if (selectedIndividualId) {
+            e.preventDefault();
+            handleDelete(selectedIndividualId);
+          }
         }
       }
       if (e.key === 'Escape' && placementMode !== 'none') {
