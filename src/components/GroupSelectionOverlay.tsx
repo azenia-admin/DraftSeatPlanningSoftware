@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { FurnitureItem } from '../types/furniture';
 
 interface GroupSelectionOverlayProps {
@@ -212,11 +212,6 @@ export default function GroupSelectionOverlay({ items, scale, onDelete, onExtend
   const boxTop = (minY - padding) * scale;
   const boxWidth = (maxX - minX + padding * 2) * scale;
   const boxHeight = (maxY - minY + padding * 2) * scale;
-
-  const firstCenterScreenX = (firstChair.x + firstChair.width / 2) * scale;
-  const firstCenterScreenY = (firstChair.y + firstChair.height / 2) * scale;
-  const lastCenterScreenX = (lastChair.x + lastChair.width / 2) * scale;
-  const lastCenterScreenY = (lastChair.y + lastChair.height / 2) * scale;
 
   // Position handles at the absolute ends of the bounding box
   const leftHandleX = boxLeft;
@@ -584,7 +579,7 @@ export default function GroupSelectionOverlay({ items, scale, onDelete, onExtend
         // Use currentRotation for display (target angle we're rotating to)
         const displayRotation = currentRotation;
         // Check snap status using the same snap helper
-        const { isSnapped, snappedAxis } = snapAxisToGrid(currentRotation, 3);
+        const { isSnapped } = snapAxisToGrid(currentRotation, 3);
 
         return (
           <>

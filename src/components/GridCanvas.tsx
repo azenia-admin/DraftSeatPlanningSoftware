@@ -1121,7 +1121,7 @@ export default function GridCanvas({
   const rotationBaseRef = useRef<{
     groupId: string;
     center: { x: number; y: number };
-    items: Array<{ id: string; relX: number; relY: number; baseRotation: number }>;
+    items: Array<{ id: string; relX: number; relY: number; width: number; height: number }>;
   } | null>(null);
 
   const getRowAngleDeg = (items: FurnitureItemType[]) => {
@@ -1193,7 +1193,7 @@ export default function GridCanvas({
           const alignedRelX = relX * cosBase - relY * sinBase;
           const alignedRelY = relX * sinBase + relY * cosBase;
 
-          return { id: item.id, relX: alignedRelX, relY: alignedRelY };
+          return { id: item.id, relX: alignedRelX, relY: alignedRelY, width: item.width, height: item.height };
         }),
       };
     }
@@ -1238,16 +1238,26 @@ export default function GridCanvas({
   };
 
   const handleRotateRow = async (groupId: string, rotation: number) => {
-    const currentFurniture = furnitureRef.current;
-    const groupItems = currentFurniture.filter((item) => item.group_id === groupId);
-    if (groupItems.length === 0) return;
+    const base = rotationBaseRef.current;
+    if (!base) {
+      rotationBaseRef.current = null;
+      return;
+    }
+
+    const angleRad = (rotation * Math.PI) / 180;
+    const cosAngle = Math.cos(angleRad);
+    const sinAngle = Math.sin(angleRad);
 
     if (isSupabaseConfigured) {
-      for (const item of groupItems) {
+      for (const orig of base.items) {
+        const newRelX = orig.relX * cosAngle - orig.relY * sinAngle;
+        const newRelY = orig.relX * sinAngle + orig.relY * cosAngle;
+        const x = base.center.x + newRelX - orig.width / 2;
+        const y = base.center.y + newRelY - orig.height / 2;
         await supabase
           .from('furniture_items')
-          .update({ x: item.x, y: item.y, rotation: item.rotation })
-          .eq('id', item.id);
+          .update({ x, y, rotation })
+          .eq('id', orig.id);
       }
     }
 
@@ -1316,18 +1326,30 @@ export default function GridCanvas({
     }));
   };
 
-  const handleMultiRotateCommit = async (groupIds: string[]) => {
+  const handleMultiRotateCommit = async (finalRotation: number) => {
+    const base = multiRotationBaseRef.current;
+    if (!base) {
+      multiRotationBaseRef.current = null;
+      return;
+    }
+
+    const angleRad = (finalRotation * Math.PI) / 180;
+    const cosA = Math.cos(angleRad);
+    const sinA = Math.sin(angleRad);
+
     if (isSupabaseConfigured) {
-      const groupIdSet = new Set(groupIds);
-      const currentFurniture = furnitureRef.current;
-      const affectedItems = currentFurniture.filter(item => groupIdSet.has(item.group_id || ''));
-      for (const item of affectedItems) {
+      for (const orig of base.items) {
+        const rx = orig.localX * cosA - orig.localY * sinA;
+        const ry = orig.localX * sinA + orig.localY * cosA;
+        const x = base.pivot.x + rx - orig.width / 2;
+        const y = base.pivot.y + ry - orig.height / 2;
         await supabase
           .from('furniture_items')
-          .update({ x: item.x, y: item.y, rotation: item.rotation })
-          .eq('id', item.id);
+          .update({ x, y, rotation: finalRotation })
+          .eq('id', orig.id);
       }
     }
+
     multiRotationBaseRef.current = null;
   };
 
@@ -1394,7 +1416,7 @@ export default function GridCanvas({
       ended = true;
       detachAll();
 
-      handleMultiRotateCommit(groupIds);
+      handleMultiRotateCommit(norm360(storedRotation + currentDelta));
 
       setIsMultiRotating(false);
       setMultiRotationDelta(0);
