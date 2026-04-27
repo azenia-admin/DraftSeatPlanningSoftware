@@ -543,7 +543,23 @@ export default function GridCanvas({
     }
 
     if (data) {
-      setFurniture(data as FurnitureItemType[]);
+      const parsed = data.map((item: Record<string, unknown>) => ({
+        ...item,
+        x: Number(item.x),
+        y: Number(item.y),
+        width: Number(item.width),
+        height: Number(item.height),
+        rotation: Number(item.rotation),
+        seat_count: item.seat_count != null ? Number(item.seat_count) : null,
+        seat_spacing: item.seat_spacing != null ? Number(item.seat_spacing) : null,
+        curve: item.curve != null ? Number(item.curve) : null,
+        chair_count: item.chair_count != null ? Number(item.chair_count) : null,
+        open_spaces: item.open_spaces != null ? Number(item.open_spaces) : null,
+        seat_label_start: item.seat_label_start != null ? Number(item.seat_label_start) : null,
+        row_label_start_at: item.row_label_start_at != null ? Number(item.row_label_start_at) : null,
+        seat_label_start_at: item.seat_label_start_at != null ? Number(item.seat_label_start_at) : null,
+      }));
+      setFurniture(parsed as FurnitureItemType[]);
     }
   };
 
