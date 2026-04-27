@@ -1238,12 +1238,10 @@ export default function GridCanvas({
   };
 
   const handleRotateRow = async (groupId: string, rotation: number) => {
-    // The furniture state should already be updated by the preview
-    // Just save to database and clear the rotation base
-    const groupItems = furniture.filter((item) => item.group_id === groupId);
+    const currentFurniture = furnitureRef.current;
+    const groupItems = currentFurniture.filter((item) => item.group_id === groupId);
     if (groupItems.length === 0) return;
 
-    // Update database
     if (isSupabaseConfigured) {
       for (const item of groupItems) {
         await supabase
@@ -1253,7 +1251,6 @@ export default function GridCanvas({
       }
     }
 
-    // Clear rotation base
     rotationBaseRef.current = null;
   };
 
@@ -1322,7 +1319,8 @@ export default function GridCanvas({
   const handleMultiRotateCommit = async (groupIds: string[]) => {
     if (isSupabaseConfigured) {
       const groupIdSet = new Set(groupIds);
-      const affectedItems = furniture.filter(item => groupIdSet.has(item.group_id || ''));
+      const currentFurniture = furnitureRef.current;
+      const affectedItems = currentFurniture.filter(item => groupIdSet.has(item.group_id || ''));
       for (const item of affectedItems) {
         await supabase
           .from('furniture_items')
