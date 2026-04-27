@@ -419,6 +419,28 @@ export default function GridCanvas({
 
   useEffect(() => { furnitureRef.current = furniture; }, [furniture]);
 
+  const syncMultiSelectionFromFurniture = useCallback((items: FurnitureItemType[]) => {
+    if (!onMultiSelectionChange || selectedItemIds.length === 0) return;
+
+    const selectedSet = new Set(selectedItemIds);
+    const selected = items.filter(f => selectedSet.has(f.id));
+
+    const groupIds = new Set<string>();
+    selected.forEach(item => {
+      if (item.group_id) groupIds.add(item.group_id);
+    });
+
+    const rowItems = items.filter(
+      item => item.type === 'row' && item.group_id && groupIds.has(item.group_id)
+    );
+
+    const allGroupItems = items.filter(
+      item => item.type !== 'row' && item.group_id && groupIds.has(item.group_id)
+    );
+
+    onMultiSelectionChange(rowItems, allGroupItems);
+  }, [onMultiSelectionChange, selectedItemIds]);
+
   useEffect(() => {
     if (!isMarqueeDragging) return;
 
@@ -1171,8 +1193,8 @@ export default function GridCanvas({
       const centerX = (minX + maxX) / 2;
       const centerY = (minY + maxY) / 2;
 
-      // Use stored rotation angle from the first chair (preserves the creation angle)
-      const storedRotation = groupItems[0].rotation || 0;
+      const rowItem = groupItems.find(item => item.type === 'row');
+      const storedRotation = norm360((rowItem ?? groupItems[0]).rotation || 0);
       const rowAngleRad = (storedRotation * Math.PI) / 180;
 
       // row-aligned frame = unrotate by stored angle
@@ -1312,18 +1334,23 @@ export default function GridCanvas({
 
     const itemMap = new Map(base.items.map(i => [i.id, i]));
 
-    setFurniture(prev => prev.map(item => {
-      const orig = itemMap.get(item.id);
-      if (!orig) return item;
-      const rx = orig.localX * cosA - orig.localY * sinA;
-      const ry = orig.localX * sinA + orig.localY * cosA;
-      return {
-        ...item,
-        x: base.pivot.x + rx - orig.width / 2,
-        y: base.pivot.y + ry - orig.height / 2,
-        rotation: targetRotation,
-      };
-    }));
+    setFurniture(prev => {
+      const next = prev.map(item => {
+        const orig = itemMap.get(item.id);
+        if (!orig) return item;
+        const rx = orig.localX * cosA - orig.localY * sinA;
+        const ry = orig.localX * sinA + orig.localY * cosA;
+        return {
+          ...item,
+          x: base.pivot.x + rx - orig.width / 2,
+          y: base.pivot.y + ry - orig.height / 2,
+          rotation: targetRotation,
+        };
+      });
+
+      syncMultiSelectionFromFurniture(next);
+      return next;
+    });
   };
 
   const handleMultiRotateCommit = async (finalRotation: number) => {
@@ -1349,6 +1376,25 @@ export default function GridCanvas({
           .eq('id', orig.id);
       }
     }
+
+    const itemMap = new Map(base.items.map(i => [i.id, i]));
+    setFurniture(prev => {
+      const next = prev.map(item => {
+        const orig = itemMap.get(item.id);
+        if (!orig) return item;
+        const rx = orig.localX * cosA - orig.localY * sinA;
+        const ry = orig.localX * sinA + orig.localY * cosA;
+        return {
+          ...item,
+          x: base.pivot.x + rx - orig.width / 2,
+          y: base.pivot.y + ry - orig.height / 2,
+          rotation: finalRotation,
+        };
+      });
+
+      syncMultiSelectionFromFurniture(next);
+      return next;
+    });
 
     multiRotationBaseRef.current = null;
   };
