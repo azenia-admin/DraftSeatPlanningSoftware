@@ -196,6 +196,39 @@ export default function PropertiesSidebar({
     onUpdate();
   };
 
+  const reassignRowLabelValues = async (
+    format: string,
+    startAt: number,
+    dir: string,
+  ) => {
+    if (!isSupabaseConfigured) { onUpdate(); return; }
+
+    const rowItems = isMultiRow
+      ? multiSelectedRowItems
+      : (selectedItem?.type === 'row' ? [selectedItem] : []);
+
+    if (rowItems.length === 0) { onUpdate(); return; }
+
+    const sorted = [...rowItems].sort((a, b) => {
+      const ay = a.y + a.height / 2;
+      const by = b.y + b.height / 2;
+      const diff = ay - by;
+      if (Math.abs(diff) > 0.5) return diff;
+      return (a.x + a.width / 2) - (b.x + b.width / 2);
+    });
+
+    if (dir === 'rtl') sorted.reverse();
+
+    await Promise.all(sorted.map((row, i) =>
+      supabase.from('furniture_items').update({
+        row_label_index: i,
+        row_label_value: formatLabel(startAt + i, format),
+      }).eq('id', row.id)
+    ));
+
+    onUpdate();
+  };
+
   if (!activeItem) return null;
 
   return (
@@ -301,9 +334,13 @@ export default function PropertiesSidebar({
                   <input
                     type="checkbox"
                     checked={rowLabelEnabled}
-                    onChange={(e) => {
-                      setRowLabelEnabled(e.target.checked);
-                      updateProperty('row_label_enabled', e.target.checked);
+                    onChange={async (e) => {
+                      const enabled = e.target.checked;
+                      setRowLabelEnabled(enabled);
+                      await updateProperty('row_label_enabled', enabled);
+                      if (enabled) {
+                        await reassignRowLabelValues(rowLabelFormat, rowLabelStartAt, rowLabelDir);
+                      }
                     }}
                     className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                   />
@@ -312,14 +349,19 @@ export default function PropertiesSidebar({
                   <span className="text-sm text-gray-700">Labels</span>
                   <select
                     value={rowLabelFormat}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const newFormat = e.target.value;
                       const max = getMaxForFormat(newFormat);
                       setRowLabelFormat(newFormat);
-                      updateProperty('row_label_format', newFormat);
+                      await updateProperty('row_label_format', newFormat);
+                      let effectiveStartAt = rowLabelStartAt;
                       if (rowLabelStartAt > max) {
+                        effectiveStartAt = 1;
                         setRowLabelStartAt(1);
-                        updateProperty('row_label_start_at', 1);
+                        await updateProperty('row_label_start_at', 1);
+                      }
+                      if (rowLabelEnabled) {
+                        await reassignRowLabelValues(newFormat, effectiveStartAt, rowLabelDir);
                       }
                     }}
                     className="w-32 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -335,10 +377,11 @@ export default function PropertiesSidebar({
                   <span className="text-sm text-gray-700">Start at</span>
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const next = Math.max(1, rowLabelStartAt - 1);
                         setRowLabelStartAt(next);
-                        updateProperty('row_label_start_at', next);
+                        await updateProperty('row_label_start_at', next);
+                        if (rowLabelEnabled) await reassignRowLabelValues(rowLabelFormat, next, rowLabelDir);
                       }}
                       className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 text-xs"
                     >
@@ -348,11 +391,12 @@ export default function PropertiesSidebar({
                       <input
                         type="number"
                         value={rowLabelStartAt}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const max = getMaxForFormat(rowLabelFormat);
                           const val = Math.min(max, Math.max(1, parseInt(e.target.value) || 1));
                           setRowLabelStartAt(val);
-                          updateProperty('row_label_start_at', val);
+                          await updateProperty('row_label_start_at', val);
+                          if (rowLabelEnabled) await reassignRowLabelValues(rowLabelFormat, val, rowLabelDir);
                         }}
                         className="w-14 text-center text-sm border border-gray-300 rounded py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         min={1}
@@ -363,11 +407,12 @@ export default function PropertiesSidebar({
                       </span>
                     )}
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const max = getMaxForFormat(rowLabelFormat);
                         const next = Math.min(max, rowLabelStartAt + 1);
                         setRowLabelStartAt(next);
-                        updateProperty('row_label_start_at', next);
+                        await updateProperty('row_label_start_at', next);
+                        if (rowLabelEnabled) await reassignRowLabelValues(rowLabelFormat, next, rowLabelDir);
                       }}
                       className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 text-xs"
                     >
@@ -378,10 +423,11 @@ export default function PropertiesSidebar({
                 <div className="flex items-center justify-between px-3 py-2">
                   <span className="text-sm text-gray-700">Direction</span>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       const next = rowLabelDir === 'ltr' ? 'rtl' : 'ltr';
                       setRowLabelDir(next);
-                      updateProperty('row_label_direction', next);
+                      await updateProperty('row_label_direction', next);
+                      if (rowLabelEnabled) await reassignRowLabelValues(rowLabelFormat, rowLabelStartAt, next);
                     }}
                     className="p-1.5 rounded hover:bg-gray-100 transition"
                     title={rowLabelDir === 'ltr' ? 'Left to right' : 'Right to left'}
