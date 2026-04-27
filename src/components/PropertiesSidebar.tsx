@@ -31,7 +31,7 @@ export default function PropertiesSidebar({
   const [curve, setCurve] = useState<number>(0);
   const [seatSpacing, setSeatSpacing] = useState<number>(1);
   const [rowLabel, setRowLabel] = useState<string>('');
-  const [rowLabelEnabled, setRowLabelEnabled] = useState<boolean>(true);
+  const [rowLabelEnabled, setRowLabelEnabled] = useState<boolean>(false);
   const [rowLabelFormat, setRowLabelFormat] = useState<string>('numbers');
   const [rowLabelStartAt, setRowLabelStartAt] = useState<number>(1);
   const [rowLabelDir, setRowLabelDir] = useState<string>('ltr');
@@ -85,7 +85,7 @@ export default function PropertiesSidebar({
       setCurve(activeItem.curve || 0);
       setSeatSpacing(activeItem.seat_spacing || 1);
       setRowLabel('');
-      setRowLabelEnabled(activeItem.row_label_enabled ?? true);
+      setRowLabelEnabled(activeItem.row_label_enabled ?? false);
       setRowLabelFormat(activeItem.row_label_format || 'numbers');
       setRowLabelStartAt(activeItem.row_label_start_at ?? 1);
       setRowLabelDir(activeItem.row_label_direction || 'ltr');
@@ -101,7 +101,7 @@ export default function PropertiesSidebar({
       setCurve(activeItem.curve || 0);
       setSeatSpacing(activeItem.seat_spacing || 1);
       setRowLabel(activeItem.row_label || '');
-      setRowLabelEnabled(activeItem.row_label_enabled ?? true);
+      setRowLabelEnabled(activeItem.row_label_enabled ?? false);
       setRowLabelFormat(activeItem.row_label_format || 'numbers');
       setRowLabelStartAt(activeItem.row_label_start_at ?? 1);
       setRowLabelDir(activeItem.row_label_direction || 'ltr');

@@ -2354,7 +2354,8 @@ export default function GridCanvas({
             );
           })}
           {furniture.filter(f => f.type === 'row' && f.row_label_enabled).map(rowItem => {
-            const pos = rowItem.row_label_position || 'both';
+            const rawPos = rowItem.row_label_position || 'both';
+            const pos = rawPos === 'auto' ? 'both' : rawPos;
             if (pos === 'none') return null;
             const label = rowLabelMap.get(rowItem.id) || '';
             const chairs = furniture.filter(f => f.type === 'chair' && f.group_id === rowItem.group_id);
