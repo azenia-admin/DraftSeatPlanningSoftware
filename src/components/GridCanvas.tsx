@@ -6,7 +6,6 @@ import ViewportNavigator from './ViewportNavigator';
 import type { FurnitureItem as FurnitureItemType, FurnitureTemplate } from '../types/furniture';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatLabel } from '../lib/labelFormat';
-import { computeRowSeatPositions } from '../lib/arcGeometry';
 import { trackPendingWrite } from '../lib/pendingWrites';
 
 const norm360 = (deg: number) => ((deg % 360) + 360) % 360;
@@ -2358,64 +2357,56 @@ export default function GridCanvas({
             const chairs = furniture.filter(f => f.type === 'chair' && f.group_id === rowItem.group_id);
             if (chairs.length === 0) return null;
 
-            const actualSeatCount = chairs.length;
-            let actualSpacing = rowItem.seat_spacing || 1.67;
-            if (actualSeatCount >= 2 && !rowItem.seat_count) {
-              const sorted = [...chairs].sort((a, b) => {
-                const d = (a.x + a.width / 2) - (b.x + b.width / 2);
-                return Math.abs(d) > 0.01 ? d : (a.y + a.height / 2) - (b.y + b.height / 2);
-              });
-              let total = 0;
-              for (let i = 1; i < sorted.length; i++) {
-                const dx = (sorted[i].x + sorted[i].width / 2) - (sorted[i - 1].x + sorted[i - 1].width / 2);
-                const dy = (sorted[i].y + sorted[i].height / 2) - (sorted[i - 1].y + sorted[i - 1].height / 2);
-                total += Math.sqrt(dx * dx + dy * dy);
-              }
-              actualSpacing = total / (sorted.length - 1);
-            }
-
-            const effectiveRow = {
-              ...rowItem,
-              seat_count: rowItem.seat_count || actualSeatCount,
-              seat_spacing: rowItem.seat_count ? (rowItem.seat_spacing || 1.67) : actualSpacing,
-            };
-            const seatPositions = computeRowSeatPositions(effectiveRow);
-            const rowCenterX = rowItem.x + rowItem.width / 2;
-            const rowCenterY = rowItem.y + rowItem.height / 2;
-            const rowRad = ((rowItem.rotation || 0) * Math.PI) / 180;
-            const cosR = Math.cos(rowRad);
-            const sinR = Math.sin(rowRad);
             const fontSize = Math.max(8, Math.min(14, scale * 0.7));
             const labelOffset = 1.4;
 
-            const toWorld = (lx: number, ly: number) => ({
-              x: rowCenterX + lx * cosR - ly * sinR,
-              y: rowCenterY + lx * sinR + ly * cosR,
+            // Sort chairs along the row's rotation axis so "first" and "last"
+            // are the real endpoints regardless of curve/angle.
+            const rowRad = ((rowItem.rotation || 0) * Math.PI) / 180;
+            const axisX = Math.cos(rowRad);
+            const axisY = Math.sin(rowRad);
+            const sortedChairs = [...chairs].sort((a, b) => {
+              const acx = a.x + a.width / 2;
+              const acy = a.y + a.height / 2;
+              const bcx = b.x + b.width / 2;
+              const bcy = b.y + b.height / 2;
+              return acx * axisX + acy * axisY - (bcx * axisX + bcy * axisY);
             });
 
             const labels: { key: string; x: number; y: number }[] = [];
 
-            if (seatPositions.length >= 2) {
-              const first = seatPositions[0];
-              const second = seatPositions[1];
-              const last = seatPositions[seatPositions.length - 1];
-              const secondLast = seatPositions[seatPositions.length - 2];
+            if (sortedChairs.length >= 2) {
+              const first = sortedChairs[0];
+              const second = sortedChairs[1];
+              const last = sortedChairs[sortedChairs.length - 1];
+              const secondLast = sortedChairs[sortedChairs.length - 2];
 
-              const leftDx = first.x - second.x;
-              const leftDy = first.y - second.y;
-              const leftLen = Math.sqrt(leftDx * leftDx + leftDy * leftDy) || 1;
-              const leftPt = toWorld(
-                first.x + (leftDx / leftLen) * labelOffset,
-                first.y + (leftDy / leftLen) * labelOffset
-              );
+              const firstCx = first.x + first.width / 2;
+              const firstCy = first.y + first.height / 2;
+              const secondCx = second.x + second.width / 2;
+              const secondCy = second.y + second.height / 2;
+              const lastCx = last.x + last.width / 2;
+              const lastCy = last.y + last.height / 2;
+              const secondLastCx = secondLast.x + secondLast.width / 2;
+              const secondLastCy = secondLast.y + secondLast.height / 2;
 
-              const rightDx = last.x - secondLast.x;
-              const rightDy = last.y - secondLast.y;
-              const rightLen = Math.sqrt(rightDx * rightDx + rightDy * rightDy) || 1;
-              const rightPt = toWorld(
-                last.x + (rightDx / rightLen) * labelOffset,
-                last.y + (rightDy / rightLen) * labelOffset
-              );
+              // Tangent direction at each end, derived from actual chair centers.
+              // For curves this follows the arc tangent; for straight rows it is the row direction.
+              const leftDx = firstCx - secondCx;
+              const leftDy = firstCy - secondCy;
+              const leftLen = Math.hypot(leftDx, leftDy) || 1;
+              const leftPt = {
+                x: firstCx + (leftDx / leftLen) * labelOffset,
+                y: firstCy + (leftDy / leftLen) * labelOffset,
+              };
+
+              const rightDx = lastCx - secondLastCx;
+              const rightDy = lastCy - secondLastCy;
+              const rightLen = Math.hypot(rightDx, rightDy) || 1;
+              const rightPt = {
+                x: lastCx + (rightDx / rightLen) * labelOffset,
+                y: lastCy + (rightDy / rightLen) * labelOffset,
+              };
 
               if (pos === 'left' || pos === 'both') {
                 labels.push({ key: `${rowItem.id}-left`, ...leftPt });
@@ -2423,13 +2414,15 @@ export default function GridCanvas({
               if (pos === 'right' || pos === 'both') {
                 labels.push({ key: `${rowItem.id}-right`, ...rightPt });
               }
-            } else if (seatPositions.length === 1) {
-              const pt = toWorld(seatPositions[0].x, seatPositions[0].y);
+            } else if (sortedChairs.length === 1) {
+              const only = sortedChairs[0];
+              const cx = only.x + only.width / 2;
+              const cy = only.y + only.height / 2;
               if (pos === 'left' || pos === 'both') {
-                labels.push({ key: `${rowItem.id}-left`, x: pt.x - cosR * labelOffset, y: pt.y - sinR * labelOffset });
+                labels.push({ key: `${rowItem.id}-left`, x: cx - axisX * labelOffset, y: cy - axisY * labelOffset });
               }
               if (pos === 'right' || pos === 'both') {
-                labels.push({ key: `${rowItem.id}-right`, x: pt.x + cosR * labelOffset, y: pt.y + sinR * labelOffset });
+                labels.push({ key: `${rowItem.id}-right`, x: cx + axisX * labelOffset, y: cy + axisY * labelOffset });
               }
             }
 
