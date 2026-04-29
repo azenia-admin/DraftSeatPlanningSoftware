@@ -27,8 +27,6 @@ export interface FurnitureItem {
   row_label_direction?: string | null;
   row_label_position?: string | null;
   row_displayed_type?: string | null;
-  row_label_index?: number | null;
-  row_label_value?: string | null;
   seat_label_format?: string | null;
   seat_displayed_type?: string | null;
   seat_label_enabled?: boolean | null;

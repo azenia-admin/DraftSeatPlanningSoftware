@@ -6,6 +6,7 @@ import ViewportNavigator from './ViewportNavigator';
 import type { FurnitureItem as FurnitureItemType, FurnitureTemplate } from '../types/furniture';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatLabel } from '../lib/labelFormat';
+import { computeRowSeatPositions } from '../lib/arcGeometry';
 
 const norm360 = (deg: number) => ((deg % 360) + 360) % 360;
 
@@ -336,19 +337,15 @@ export default function GridCanvas({
         setSpacePressed(true);
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        const tag = (e.target as HTMLElement).tagName;
-        const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement).isContentEditable;
-        if (!isEditable) {
-          if (selectedItemIds.length > 0) {
-            e.preventDefault();
-            handleDeleteMultiSelection();
-          } else if (selectedId) {
-            e.preventDefault();
-            handleDelete(selectedId);
-          } else if (selectedIndividualId) {
-            e.preventDefault();
-            handleDelete(selectedIndividualId);
-          }
+        if (selectedItemIds.length > 0) {
+          e.preventDefault();
+          handleDeleteMultiSelection();
+        } else if (selectedId) {
+          e.preventDefault();
+          handleDelete(selectedId);
+        } else if (selectedIndividualId) {
+          e.preventDefault();
+          handleDelete(selectedIndividualId);
         }
       }
       if (e.key === 'Escape' && placementMode !== 'none') {
@@ -417,28 +414,6 @@ export default function GridCanvas({
   }, [isPanning]);
 
   useEffect(() => { furnitureRef.current = furniture; }, [furniture]);
-
-  const syncMultiSelectionFromFurniture = useCallback((items: FurnitureItemType[]) => {
-    if (!onMultiSelectionChange || selectedItemIds.length === 0) return;
-
-    const selectedSet = new Set(selectedItemIds);
-    const selected = items.filter(f => selectedSet.has(f.id));
-
-    const groupIds = new Set<string>();
-    selected.forEach(item => {
-      if (item.group_id) groupIds.add(item.group_id);
-    });
-
-    const rowItems = items.filter(
-      item => item.type === 'row' && item.group_id && groupIds.has(item.group_id)
-    );
-
-    const allGroupItems = items.filter(
-      item => item.type !== 'row' && item.group_id && groupIds.has(item.group_id)
-    );
-
-    onMultiSelectionChange(rowItems, allGroupItems);
-  }, [onMultiSelectionChange, selectedItemIds]);
 
   useEffect(() => {
     if (!isMarqueeDragging) return;
@@ -564,23 +539,7 @@ export default function GridCanvas({
     }
 
     if (data) {
-      const parsed = data.map((item: Record<string, unknown>) => ({
-        ...item,
-        x: Number(item.x),
-        y: Number(item.y),
-        width: Number(item.width),
-        height: Number(item.height),
-        rotation: Number(item.rotation),
-        seat_count: item.seat_count != null ? Number(item.seat_count) : null,
-        seat_spacing: item.seat_spacing != null ? Number(item.seat_spacing) : null,
-        curve: item.curve != null ? Number(item.curve) : null,
-        chair_count: item.chair_count != null ? Number(item.chair_count) : null,
-        open_spaces: item.open_spaces != null ? Number(item.open_spaces) : null,
-        seat_label_start: item.seat_label_start != null ? Number(item.seat_label_start) : null,
-        row_label_start_at: item.row_label_start_at != null ? Number(item.row_label_start_at) : null,
-        seat_label_start_at: item.seat_label_start_at != null ? Number(item.seat_label_start_at) : null,
-      }));
-      setFurniture(parsed as FurnitureItemType[]);
+      setFurniture(data as FurnitureItemType[]);
     }
   };
 
@@ -1142,7 +1101,7 @@ export default function GridCanvas({
   const rotationBaseRef = useRef<{
     groupId: string;
     center: { x: number; y: number };
-    items: Array<{ id: string; relX: number; relY: number; width: number; height: number }>;
+    items: Array<{ id: string; relX: number; relY: number; baseRotation: number }>;
   } | null>(null);
 
   const getRowAngleDeg = (items: FurnitureItemType[]) => {
@@ -1192,8 +1151,8 @@ export default function GridCanvas({
       const centerX = (minX + maxX) / 2;
       const centerY = (minY + maxY) / 2;
 
-      const rowItem = groupItems.find(item => item.type === 'row');
-      const storedRotation = norm360((rowItem ?? groupItems[0]).rotation || 0);
+      // Use stored rotation angle from the first chair (preserves the creation angle)
+      const storedRotation = groupItems[0].rotation || 0;
       const rowAngleRad = (storedRotation * Math.PI) / 180;
 
       // row-aligned frame = unrotate by stored angle
@@ -1214,7 +1173,7 @@ export default function GridCanvas({
           const alignedRelX = relX * cosBase - relY * sinBase;
           const alignedRelY = relX * sinBase + relY * cosBase;
 
-          return { id: item.id, relX: alignedRelX, relY: alignedRelY, width: item.width, height: item.height };
+          return { id: item.id, relX: alignedRelX, relY: alignedRelY };
         }),
       };
     }
@@ -1259,29 +1218,22 @@ export default function GridCanvas({
   };
 
   const handleRotateRow = async (groupId: string, rotation: number) => {
-    const base = rotationBaseRef.current;
-    if (!base) {
-      rotationBaseRef.current = null;
-      return;
-    }
+    // The furniture state should already be updated by the preview
+    // Just save to database and clear the rotation base
+    const groupItems = furniture.filter((item) => item.group_id === groupId);
+    if (groupItems.length === 0) return;
 
-    const angleRad = (rotation * Math.PI) / 180;
-    const cosAngle = Math.cos(angleRad);
-    const sinAngle = Math.sin(angleRad);
-
+    // Update database
     if (isSupabaseConfigured) {
-      for (const orig of base.items) {
-        const newRelX = orig.relX * cosAngle - orig.relY * sinAngle;
-        const newRelY = orig.relX * sinAngle + orig.relY * cosAngle;
-        const x = base.center.x + newRelX - orig.width / 2;
-        const y = base.center.y + newRelY - orig.height / 2;
+      for (const item of groupItems) {
         await supabase
           .from('furniture_items')
-          .update({ x, y, rotation })
-          .eq('id', orig.id);
+          .update({ x: item.x, y: item.y, rotation: item.rotation })
+          .eq('id', item.id);
       }
     }
 
+    // Clear rotation base
     rotationBaseRef.current = null;
   };
 
@@ -1333,68 +1285,31 @@ export default function GridCanvas({
 
     const itemMap = new Map(base.items.map(i => [i.id, i]));
 
-    setFurniture(prev => {
-      const next = prev.map(item => {
-        const orig = itemMap.get(item.id);
-        if (!orig) return item;
-        const rx = orig.localX * cosA - orig.localY * sinA;
-        const ry = orig.localX * sinA + orig.localY * cosA;
-        return {
-          ...item,
-          x: base.pivot.x + rx - orig.width / 2,
-          y: base.pivot.y + ry - orig.height / 2,
-          rotation: targetRotation,
-        };
-      });
-
-      syncMultiSelectionFromFurniture(next);
-      return next;
-    });
+    setFurniture(prev => prev.map(item => {
+      const orig = itemMap.get(item.id);
+      if (!orig) return item;
+      const rx = orig.localX * cosA - orig.localY * sinA;
+      const ry = orig.localX * sinA + orig.localY * cosA;
+      return {
+        ...item,
+        x: base.pivot.x + rx - orig.width / 2,
+        y: base.pivot.y + ry - orig.height / 2,
+        rotation: targetRotation,
+      };
+    }));
   };
 
-  const handleMultiRotateCommit = async (finalRotation: number) => {
-    const base = multiRotationBaseRef.current;
-    if (!base) {
-      multiRotationBaseRef.current = null;
-      return;
-    }
-
-    const angleRad = (finalRotation * Math.PI) / 180;
-    const cosA = Math.cos(angleRad);
-    const sinA = Math.sin(angleRad);
-
+  const handleMultiRotateCommit = async (groupIds: string[]) => {
     if (isSupabaseConfigured) {
-      for (const orig of base.items) {
-        const rx = orig.localX * cosA - orig.localY * sinA;
-        const ry = orig.localX * sinA + orig.localY * cosA;
-        const x = base.pivot.x + rx - orig.width / 2;
-        const y = base.pivot.y + ry - orig.height / 2;
+      const groupIdSet = new Set(groupIds);
+      const affectedItems = furniture.filter(item => groupIdSet.has(item.group_id || ''));
+      for (const item of affectedItems) {
         await supabase
           .from('furniture_items')
-          .update({ x, y, rotation: finalRotation })
-          .eq('id', orig.id);
+          .update({ x: item.x, y: item.y, rotation: item.rotation })
+          .eq('id', item.id);
       }
     }
-
-    const itemMap = new Map(base.items.map(i => [i.id, i]));
-    setFurniture(prev => {
-      const next = prev.map(item => {
-        const orig = itemMap.get(item.id);
-        if (!orig) return item;
-        const rx = orig.localX * cosA - orig.localY * sinA;
-        const ry = orig.localX * sinA + orig.localY * cosA;
-        return {
-          ...item,
-          x: base.pivot.x + rx - orig.width / 2,
-          y: base.pivot.y + ry - orig.height / 2,
-          rotation: finalRotation,
-        };
-      });
-
-      syncMultiSelectionFromFurniture(next);
-      return next;
-    });
-
     multiRotationBaseRef.current = null;
   };
 
@@ -1461,7 +1376,7 @@ export default function GridCanvas({
       ended = true;
       detachAll();
 
-      handleMultiRotateCommit(norm360(storedRotation + currentDelta));
+      handleMultiRotateCommit(groupIds);
 
       setIsMultiRotating(false);
       setMultiRotationDelta(0);
@@ -2318,18 +2233,25 @@ export default function GridCanvas({
   const rowLabelMap = useMemo(() => {
     const map = new Map<string, string>();
     const rows = furniture.filter(f => f.type === 'row' && f.row_label_enabled);
+    if (rows.length === 0) return map;
 
-    for (const row of rows) {
-      if (row.row_label_value) {
-        map.set(row.id, row.row_label_value);
-        continue;
-      }
+    const fmt = rows[0].row_label_format || 'LETTERS';
+    const startAt = rows[0].row_label_start_at ?? 1;
+    const dir = rows[0].row_label_direction || 'ltr';
 
-      const fmt = row.row_label_format || 'LETTERS';
-      const startAt = row.row_label_start_at ?? 1;
-      const index = row.row_label_index ?? 0;
-      map.set(row.id, formatLabel(startAt + index, fmt));
-    }
+    const sorted = [...rows].sort((a, b) => {
+      const ay = a.y + a.height / 2;
+      const by = b.y + b.height / 2;
+      const diff = ay - by;
+      if (Math.abs(diff) > 0.5) return diff;
+      return (a.x + a.width / 2) - (b.x + b.width / 2);
+    });
+
+    if (dir === 'rtl') sorted.reverse();
+
+    sorted.forEach((row, i) => {
+      map.set(row.id, formatLabel(startAt + i, fmt));
+    });
 
     return map;
   }, [furniture]);
@@ -2432,58 +2354,85 @@ export default function GridCanvas({
             );
           })}
           {furniture.filter(f => f.type === 'row' && f.row_label_enabled).map(rowItem => {
-            const rawPos = rowItem.row_label_position || 'both';
-            const pos = rawPos === 'auto' ? 'both' : rawPos;
+            const pos = rowItem.row_label_position || 'both';
             if (pos === 'none') return null;
             const label = rowLabelMap.get(rowItem.id) || '';
             const chairs = furniture.filter(f => f.type === 'chair' && f.group_id === rowItem.group_id);
             if (chairs.length === 0) return null;
 
-            const rowRad = ((rowItem.rotation || 0) * Math.PI) / 180;
-            const axisX = Math.cos(rowRad);
-            const axisY = Math.sin(rowRad);
-
-            const sortedChairs = [...chairs].sort((a, b) => {
-              const acx = a.x + a.width / 2;
-              const acy = a.y + a.height / 2;
-              const bcx = b.x + b.width / 2;
-              const bcy = b.y + b.height / 2;
-              return acx * axisX + acy * axisY - (bcx * axisX + bcy * axisY);
-            });
-
-            const first = sortedChairs[0];
-            const last = sortedChairs[sortedChairs.length - 1];
-
-            const firstCx = first.x + first.width / 2;
-            const firstCy = first.y + first.height / 2;
-            const lastCx = last.x + last.width / 2;
-            const lastCy = last.y + last.height / 2;
-
-            const dx = lastCx - firstCx;
-            const dy = lastCy - firstCy;
-            const len = Math.hypot(dx, dy) || 1;
-
-            const dirX = dx / len;
-            const dirY = dy / len;
-
-            const fontSize = Math.max(8, Math.min(14, scale * 0.7));
-            const labelOffset = 1.4;
-            const labels: { key: string; x: number; y: number }[] = [];
-
-            if (pos === 'left' || pos === 'both') {
-              labels.push({
-                key: `${rowItem.id}-left`,
-                x: firstCx - dirX * labelOffset,
-                y: firstCy - dirY * labelOffset,
+            const actualSeatCount = chairs.length;
+            let actualSpacing = rowItem.seat_spacing || 1.67;
+            if (actualSeatCount >= 2 && !rowItem.seat_count) {
+              const sorted = [...chairs].sort((a, b) => {
+                const d = (a.x + a.width / 2) - (b.x + b.width / 2);
+                return Math.abs(d) > 0.01 ? d : (a.y + a.height / 2) - (b.y + b.height / 2);
               });
+              let total = 0;
+              for (let i = 1; i < sorted.length; i++) {
+                const dx = (sorted[i].x + sorted[i].width / 2) - (sorted[i - 1].x + sorted[i - 1].width / 2);
+                const dy = (sorted[i].y + sorted[i].height / 2) - (sorted[i - 1].y + sorted[i - 1].height / 2);
+                total += Math.sqrt(dx * dx + dy * dy);
+              }
+              actualSpacing = total / (sorted.length - 1);
             }
 
-            if (pos === 'right' || pos === 'both') {
-              labels.push({
-                key: `${rowItem.id}-right`,
-                x: lastCx + dirX * labelOffset,
-                y: lastCy + dirY * labelOffset,
-              });
+            const effectiveRow = {
+              ...rowItem,
+              seat_count: rowItem.seat_count || actualSeatCount,
+              seat_spacing: rowItem.seat_count ? (rowItem.seat_spacing || 1.67) : actualSpacing,
+            };
+            const seatPositions = computeRowSeatPositions(effectiveRow);
+            const rowCenterX = rowItem.x + rowItem.width / 2;
+            const rowCenterY = rowItem.y + rowItem.height / 2;
+            const rowRad = ((rowItem.rotation || 0) * Math.PI) / 180;
+            const cosR = Math.cos(rowRad);
+            const sinR = Math.sin(rowRad);
+            const fontSize = Math.max(8, Math.min(14, scale * 0.7));
+            const labelOffset = 1.4;
+
+            const toWorld = (lx: number, ly: number) => ({
+              x: rowCenterX + lx * cosR - ly * sinR,
+              y: rowCenterY + lx * sinR + ly * cosR,
+            });
+
+            const labels: { key: string; x: number; y: number }[] = [];
+
+            if (seatPositions.length >= 2) {
+              const first = seatPositions[0];
+              const second = seatPositions[1];
+              const last = seatPositions[seatPositions.length - 1];
+              const secondLast = seatPositions[seatPositions.length - 2];
+
+              const leftDx = first.x - second.x;
+              const leftDy = first.y - second.y;
+              const leftLen = Math.sqrt(leftDx * leftDx + leftDy * leftDy) || 1;
+              const leftPt = toWorld(
+                first.x + (leftDx / leftLen) * labelOffset,
+                first.y + (leftDy / leftLen) * labelOffset
+              );
+
+              const rightDx = last.x - secondLast.x;
+              const rightDy = last.y - secondLast.y;
+              const rightLen = Math.sqrt(rightDx * rightDx + rightDy * rightDy) || 1;
+              const rightPt = toWorld(
+                last.x + (rightDx / rightLen) * labelOffset,
+                last.y + (rightDy / rightLen) * labelOffset
+              );
+
+              if (pos === 'left' || pos === 'both') {
+                labels.push({ key: `${rowItem.id}-left`, ...leftPt });
+              }
+              if (pos === 'right' || pos === 'both') {
+                labels.push({ key: `${rowItem.id}-right`, ...rightPt });
+              }
+            } else if (seatPositions.length === 1) {
+              const pt = toWorld(seatPositions[0].x, seatPositions[0].y);
+              if (pos === 'left' || pos === 'both') {
+                labels.push({ key: `${rowItem.id}-left`, x: pt.x - cosR * labelOffset, y: pt.y - sinR * labelOffset });
+              }
+              if (pos === 'right' || pos === 'both') {
+                labels.push({ key: `${rowItem.id}-right`, x: pt.x + cosR * labelOffset, y: pt.y + sinR * labelOffset });
+              }
             }
 
             return labels.map(l => (

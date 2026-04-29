@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { FurnitureItem } from '../types/furniture';
 
 interface GroupSelectionOverlayProps {
@@ -161,18 +161,14 @@ export default function GroupSelectionOverlay({ items, scale, onDelete, onExtend
     maxY = Math.max(maxY, item.y + item.height);
   });
 
-  // Only use chairs (not the invisible row item) for endpoint detection
-  const chairs = items.filter(i => i.type !== 'row');
-  const searchItems = chairs.length >= 2 ? chairs : items;
-
   let maxDistance = 0;
-  let endpointA = searchItems[0];
-  let endpointB = searchItems[searchItems.length - 1];
+  let endpointA = items[0];
+  let endpointB = items[items.length - 1];
 
-  for (let i = 0; i < searchItems.length; i++) {
-    for (let j = i + 1; j < searchItems.length; j++) {
-      const itemI = searchItems[i];
-      const itemJ = searchItems[j];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const itemI = items[i];
+      const itemJ = items[j];
       const centerIX = itemI.x + itemI.width / 2;
       const centerIY = itemI.y + itemI.height / 2;
       const centerJX = itemJ.x + itemJ.width / 2;
@@ -197,9 +193,21 @@ export default function GroupSelectionOverlay({ items, scale, onDelete, onExtend
   const firstChair = (aCx < bCx || (aCx === bCx && aCy < bCy)) ? endpointA : endpointB;
   const lastChair = firstChair === endpointA ? endpointB : endpointA;
 
-  // Use stored rotation from the row item (authoritative), fallback to first item
-  const rowItem = items.find(i => i.type === 'row');
-  const storedRotation = norm360((rowItem ?? items[0]).rotation || 0);
+  // Always calculate the live geometric angle from actual positions
+  const firstCenterX = firstChair.x + firstChair.width / 2;
+  const firstCenterY = firstChair.y + firstChair.height / 2;
+  const lastCenterX = lastChair.x + lastChair.width / 2;
+  const lastCenterY = lastChair.y + lastChair.height / 2;
+
+  const liveGeometricAngle = Math.atan2(
+    lastCenterY - firstCenterY,
+    lastCenterX - firstCenterX
+  ) * (180 / Math.PI);
+
+  const liveAngle360 = norm360(liveGeometricAngle);
+
+  // Use stored rotation when idle, target rotation when rotating
+  const storedRotation = norm360(items[0].rotation ?? liveGeometricAngle);
   const currentRotation = isRotating && rotationStart
     ? norm360(rotationStart.initialRotation + rotationDelta)
     : storedRotation;
@@ -212,6 +220,11 @@ export default function GroupSelectionOverlay({ items, scale, onDelete, onExtend
   const boxTop = (minY - padding) * scale;
   const boxWidth = (maxX - minX + padding * 2) * scale;
   const boxHeight = (maxY - minY + padding * 2) * scale;
+
+  const firstCenterScreenX = (firstChair.x + firstChair.width / 2) * scale;
+  const firstCenterScreenY = (firstChair.y + firstChair.height / 2) * scale;
+  const lastCenterScreenX = (lastChair.x + lastChair.width / 2) * scale;
+  const lastCenterScreenY = (lastChair.y + lastChair.height / 2) * scale;
 
   // Position handles at the absolute ends of the bounding box
   const leftHandleX = boxLeft;
@@ -579,7 +592,7 @@ export default function GroupSelectionOverlay({ items, scale, onDelete, onExtend
         // Use currentRotation for display (target angle we're rotating to)
         const displayRotation = currentRotation;
         // Check snap status using the same snap helper
-        const { isSnapped } = snapAxisToGrid(currentRotation, 3);
+        const { isSnapped, snappedAxis } = snapAxisToGrid(currentRotation, 3);
 
         return (
           <>
