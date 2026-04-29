@@ -995,19 +995,39 @@ export default function GridCanvas({
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
+    // Space + wheel pans the canvas
+    if (spacePressed && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      setCameraX(prev => prev - e.deltaX);
+      setCameraY(prev => prev - e.deltaY);
       return;
     }
 
-    if (!spacePressed) {
-      return;
-    }
-
+    // Otherwise, wheel zooms, anchored on the cursor so the world point under
+    // the cursor stays fixed across the zoom.
+    if (!viewportRef.current) return;
     e.preventDefault();
 
-    // Update camera position
-    setCameraX(prev => prev - e.deltaX);
-    setCameraY(prev => prev - e.deltaY);
+    const rect = viewportRef.current.getBoundingClientRect();
+    const cursorX = e.clientX - rect.left;
+    const cursorY = e.clientY - rect.top;
+
+    // Pinch-zoom on trackpads sends ctrl/meta with small deltas; normal wheel sends larger deltas.
+    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
+
+    setScale(prevScale => {
+      const nextScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, prevScale * zoomFactor));
+      if (nextScale === prevScale) return prevScale;
+
+      // Keep the world point under the cursor invariant:
+      // worldX = (cursorX - cameraX) / prevScale = (cursorX - newCameraX) / nextScale
+      // => newCameraX = cursorX - (cursorX - cameraX) * (nextScale / prevScale)
+      const ratio = nextScale / prevScale;
+      setCameraX(prevCam => cursorX - (cursorX - prevCam) * ratio);
+      setCameraY(prevCam => cursorY - (cursorY - prevCam) * ratio);
+
+      return nextScale;
+    });
   };
 
   const handleDelete = async (id: string) => {
