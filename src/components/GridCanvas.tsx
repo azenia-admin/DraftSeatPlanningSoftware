@@ -378,6 +378,11 @@ export default function GridCanvas({
   useEffect(() => {
     if (!isPanning) return;
 
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'grabbing';
+
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (!lastPanScreen.current) return;
 
@@ -410,6 +415,8 @@ export default function GridCanvas({
     return () => {
       window.removeEventListener('mousemove', handleGlobalMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
     };
   }, [isPanning]);
 
@@ -937,7 +944,7 @@ export default function GridCanvas({
     const isFurnitureItem = target.closest('[data-furniture-item]');
     const isCanvasClick = target.hasAttribute('data-canvas') || target.closest('[data-canvas]');
 
-    if (spacePressed) {
+    if (spacePressed || e.button === 1) {
       setIsPanning(true);
       panStartScreen.current = { x: e.clientX, y: e.clientY };
       lastPanScreen.current = { x: e.clientX, y: e.clientY };
@@ -945,6 +952,8 @@ export default function GridCanvas({
       e.preventDefault();
       return;
     }
+
+    if (e.button !== 0) return;
 
     if (!isFurnitureItem && isCanvasClick && (placementMode === 'marquee' || placementMode === 'none')) {
       marqueeStartScreenRef.current = { x: screenX, y: screenY };
@@ -994,8 +1003,10 @@ export default function GridCanvas({
     mouseMoved.current = false;
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    // Space + wheel pans the canvas
+  const handleWheelNative = useCallback((e: WheelEvent) => {
+    if (!viewportRef.current) return;
+
+    // Space + wheel pans the canvas (translation only, independent of zoom).
     if (spacePressed && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       setCameraX(prev => prev - e.deltaX);
@@ -1003,16 +1014,13 @@ export default function GridCanvas({
       return;
     }
 
-    // Otherwise, wheel zooms, anchored on the cursor so the world point under
-    // the cursor stays fixed across the zoom.
-    if (!viewportRef.current) return;
+    // Otherwise, wheel zooms anchored on the cursor.
     e.preventDefault();
 
     const rect = viewportRef.current.getBoundingClientRect();
     const cursorX = e.clientX - rect.left;
     const cursorY = e.clientY - rect.top;
 
-    // Pinch-zoom on trackpads sends ctrl/meta with small deltas; normal wheel sends larger deltas.
     const zoomFactor = Math.exp(-e.deltaY * 0.0015);
 
     setScale(prevScale => {
@@ -1021,14 +1029,20 @@ export default function GridCanvas({
 
       // Keep the world point under the cursor invariant:
       // worldX = (cursorX - cameraX) / prevScale = (cursorX - newCameraX) / nextScale
-      // => newCameraX = cursorX - (cursorX - cameraX) * (nextScale / prevScale)
       const ratio = nextScale / prevScale;
       setCameraX(prevCam => cursorX - (cursorX - prevCam) * ratio);
       setCameraY(prevCam => cursorY - (cursorY - prevCam) * ratio);
 
       return nextScale;
     });
-  };
+  }, [spacePressed]);
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheelNative, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheelNative);
+  }, [handleWheelNative]);
 
   const handleDelete = async (id: string) => {
     const itemToDelete = furniture.find((item) => item.id === id);
@@ -2332,7 +2346,6 @@ export default function GridCanvas({
           onMouseUp={handleMouseUp}
           onMouseLeave={() => setCursorPosition(null)}
           onClick={handleCanvasClick}
-          onWheel={handleWheel}
         >
           {furniture.map((item) => {
             const selectedItem = furniture.find((f) => f.id === selectedId);
