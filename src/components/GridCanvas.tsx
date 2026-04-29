@@ -2238,25 +2238,18 @@ export default function GridCanvas({
   const rowLabelMap = useMemo(() => {
     const map = new Map<string, string>();
     const rows = furniture.filter(f => f.type === 'row' && f.row_label_enabled);
-    if (rows.length === 0) return map;
 
-    const fmt = rows[0].row_label_format || 'LETTERS';
-    const startAt = rows[0].row_label_start_at ?? 1;
-    const dir = rows[0].row_label_direction || 'ltr';
+    for (const row of rows) {
+      if (row.row_label_value) {
+        map.set(row.id, row.row_label_value);
+        continue;
+      }
 
-    const sorted = [...rows].sort((a, b) => {
-      const ay = a.y + a.height / 2;
-      const by = b.y + b.height / 2;
-      const diff = ay - by;
-      if (Math.abs(diff) > 0.5) return diff;
-      return (a.x + a.width / 2) - (b.x + b.width / 2);
-    });
-
-    if (dir === 'rtl') sorted.reverse();
-
-    sorted.forEach((row, i) => {
-      map.set(row.id, formatLabel(startAt + i, fmt));
-    });
+      const fmt = row.row_label_format || 'LETTERS';
+      const startAt = row.row_label_start_at ?? 1;
+      const index = row.row_label_index ?? 0;
+      map.set(row.id, formatLabel(startAt + index, fmt));
+    }
 
     return map;
   }, [furniture]);
