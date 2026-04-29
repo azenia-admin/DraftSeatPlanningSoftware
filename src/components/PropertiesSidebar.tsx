@@ -5,6 +5,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { updateRowCurvePositions, updateMultiRowCurvePositions } from '../lib/rowCurveUpdate';
 import ScrubInput from './ScrubInput';
 import { formatLabel, getMaxForFormat } from '../lib/labelFormat';
+import { awaitPendingWrites } from '../lib/pendingWrites';
 
 interface PropertiesSidebarProps {
   selectedItem: FurnitureItem | null;
@@ -169,6 +170,11 @@ export default function PropertiesSidebar({
 
   const updateProperty = async (field: string, value: any) => {
     if (field === 'curve') return;
+
+    // Wait for any in-flight geometry writes (e.g. rotation commit) to finish
+    // before touching the DB or refreshing, so label changes can't race with
+    // rotation saves and overwrite displayed geometry with stale values.
+    await awaitPendingWrites();
 
     if (isMultiRow) {
       if (isSupabaseConfigured) {

@@ -7,6 +7,7 @@ import type { FurnitureItem as FurnitureItemType, FurnitureTemplate } from '../t
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatLabel } from '../lib/labelFormat';
 import { computeRowSeatPositions } from '../lib/arcGeometry';
+import { trackPendingWrite } from '../lib/pendingWrites';
 
 const norm360 = (deg: number) => ((deg % 360) + 360) % 360;
 
@@ -1220,17 +1221,19 @@ export default function GridCanvas({
   const handleRotateRow = async (groupId: string, rotation: number) => {
     // The furniture state should already be updated by the preview
     // Just save to database and clear the rotation base
-    const groupItems = furniture.filter((item) => item.group_id === groupId);
+    const groupItems = furnitureRef.current.filter((item) => item.group_id === groupId);
     if (groupItems.length === 0) return;
 
-    // Update database
+    // Update database in parallel and track the promise so other handlers can await it
     if (isSupabaseConfigured) {
-      for (const item of groupItems) {
-        await supabase
+      const writes = Promise.all(groupItems.map(item =>
+        supabase
           .from('furniture_items')
           .update({ x: item.x, y: item.y, rotation: item.rotation })
-          .eq('id', item.id);
-      }
+          .eq('id', item.id)
+      ));
+      trackPendingWrite(writes);
+      await writes;
     }
 
     // Clear rotation base
@@ -1302,13 +1305,15 @@ export default function GridCanvas({
   const handleMultiRotateCommit = async (groupIds: string[]) => {
     if (isSupabaseConfigured) {
       const groupIdSet = new Set(groupIds);
-      const affectedItems = furniture.filter(item => groupIdSet.has(item.group_id || ''));
-      for (const item of affectedItems) {
-        await supabase
+      const affectedItems = furnitureRef.current.filter(item => groupIdSet.has(item.group_id || ''));
+      const writes = Promise.all(affectedItems.map(item =>
+        supabase
           .from('furniture_items')
           .update({ x: item.x, y: item.y, rotation: item.rotation })
-          .eq('id', item.id);
-      }
+          .eq('id', item.id)
+      ));
+      trackPendingWrite(writes);
+      await writes;
     }
     multiRotationBaseRef.current = null;
   };
